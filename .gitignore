@@ -1,0 +1,12 @@
+# Environment setup
+venv/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+
+# OAuth credentials
+credentials.json
+token.json
+
+data/
