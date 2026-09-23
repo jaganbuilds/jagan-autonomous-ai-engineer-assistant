@@ -28,7 +28,13 @@ def mock_db_repository():
     from app.database.action_repository import action_repository
     action_repository.db_path = db_path
     
+    import sqlite3
+    # Hold connection open so shared in-memory DB doesn't get destroyed
+    keepalive_conn = sqlite3.connect(db_path)
+    
     yield repo
+    
+    keepalive_conn.close()
     
     # Reset it after tests (optional, but good practice)
     set_job_repository_for_testing(None)
@@ -74,3 +80,16 @@ def mock_preflight_for_execution_tests(request, monkeypatch):
         )
         
     monkeypatch.setattr("app.integrations.capability_service.CapabilityService.get_integration_capabilities", dummy_get_capabilities)
+
+import os
+@pytest.fixture(autouse=True)
+def _mock_llm_for_tests(monkeypatch):
+    if not os.environ.get('LIVE_TESTS'):
+        from unittest.mock import MagicMock
+        def dummy_get_llm_client():
+            mock = MagicMock()
+            mock.models.generate_content.return_value.text = '{"status": "success"}'
+            mock.models.generate_content.return_value.function_calls = []
+            return mock
+        monkeypatch.setattr('app.llm_client.get_llm_client', dummy_get_llm_client)
+        monkeypatch.setattr('app.llm_client.get_llm_client_or_raise', dummy_get_llm_client)

@@ -11,18 +11,18 @@ def gateway():
     return gw
 
 def test_github_validation_list_repos(gateway):
-    req = ActionRequest(
-        integration="github",
-        action_type=ActionType.READ,
-        session_id="s1",
-        arguments={"action": "LIST_REPOSITORIES"}
-    )
-    # The integration executes it directly since it is READ (LOW risk)
-    # But since we aren't mocking the client yet, we just want to ensure it tries to execute and fails with AUTHENTICATION_REQUIRED
-    res = gateway.execute_action(req)
-    # With no token in config, it raises AUTHENTICATION_REQUIRED
-    assert res.status == ActionStatus.FAILED
-    assert "AUTHENTICATION_REQUIRED" in res.message
+    from unittest.mock import patch
+    with patch("app.integrations.github_client.get_settings") as mock_settings:
+        mock_settings.return_value.github_token = None
+        req = ActionRequest(
+            integration="github",
+            action_type=ActionType.READ,
+            session_id="s1",
+            arguments={"action": "LIST_REPOSITORIES"}
+        )
+        res = gateway.execute_action(req)
+        assert res.status == ActionStatus.FAILED
+        assert "AUTHENTICATION_REQUIRED" in res.message
 
 def test_github_validation_missing_owner(gateway):
     req = ActionRequest(

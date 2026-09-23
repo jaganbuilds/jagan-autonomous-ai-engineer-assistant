@@ -31,7 +31,7 @@ def dummy_job_pair():
     return JobMatchPair(job=job)
 
 @patch("app.tools.hr_email_tool.get_settings")
-@patch("app.tools.hr_email_tool.genai.Client")
+@patch("app.llm_client.get_llm_client_or_raise")
 def test_hr_email_tool_success(mock_client, mock_settings, dummy_profile, dummy_job_pair):
     mock_settings.return_value.gemini_api_key = "fake_key"
     

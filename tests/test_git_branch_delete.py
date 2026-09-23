@@ -79,7 +79,7 @@ def test_branch_validation(local_system):
     
     valid, err = check("branch; rm -rf /")
     assert valid is False
-    assert "dangerous" in err
+    assert "Invalid characters" in err
     
     valid, err = check("HEAD")
     assert valid is False

@@ -118,7 +118,8 @@ class AgentPlanner:
         """
         
         try:
-            client = genai.Client(api_key=self.api_key)
+            from app.llm_client import get_llm_client_or_raise
+            client = get_llm_client_or_raise()
             response = client.models.generate_content(
                 model='gemini-3.6-flash',
                 contents=prompt,

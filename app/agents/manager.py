@@ -18,8 +18,9 @@ class ManagerAgent:
         self.client = None
         self._chats: Dict[str, Any] = {}
         
-        if self.api_key:
-             self.client = genai.Client(api_key=self.api_key)
+        from app.llm_client import get_llm_client
+        self.client = get_llm_client()
+        if self.client:
              self.model = 'gemini-3.6-flash'
              self.base_config = types.GenerateContentConfig(
                  system_instruction=(
@@ -299,4 +300,9 @@ class ManagerAgent:
         except Exception as e:
             state_manager.update_status(session_id, SessionStatus.ERROR)
             logger.error(f"Error processing message: {e}")
+            from google.genai.errors import APIError
+            if isinstance(e, APIError):
+                return "The AI model is temporarily unavailable. Please try again later."
+            if "deadline" in str(e).lower() or "timeout" in str(e).lower():
+                return "The AI model is temporarily unavailable. Please try again later."
             return f"Error: Failed to process message. Details: {str(e)}"

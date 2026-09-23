@@ -59,10 +59,10 @@ class CodeFixProposer:
         
     def _generate_with_llm(self, filepath: str, message: str, content: str) -> Optional[ProposedFix]:
         try:
-            from google import genai
+            from app.llm_client import get_llm_client_or_raise
             from google.genai import types
             
-            client = genai.Client(api_key=self.api_key)
+            client = get_llm_client_or_raise()
             prompt = f"""
             Analyze this test failure and propose a fix.
             File: {filepath}

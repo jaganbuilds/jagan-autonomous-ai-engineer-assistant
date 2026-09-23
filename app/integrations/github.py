@@ -67,6 +67,19 @@ class GitHubIntegration(BaseIntegration):
                 return False, "Missing 'repo'."
             return True, ""
             
+        elif action == "CREATE_REPOSITORY":
+            name = arguments.get("name")
+            if not name or not str(name).strip() or len(str(name)) > 100:
+                return False, "Invalid or missing 'name'."
+            import re
+            if str(name) in [".", ".."] or not re.match(r'^[a-zA-Z0-9_\-\.]+$', str(name)):
+                return False, "Invalid characters in repository name."
+            if arguments.get("description") and len(str(arguments.get("description"))) > 500:
+                return False, "Oversized 'description'."
+            if arguments.get("visibility") not in ["public", "private"]:
+                return False, "Invalid 'visibility'."
+            return True, ""
+            
         elif action == "CREATE_BRANCH":
             if not arguments.get("owner") or not arguments.get("repo"):
                 return False, "Missing 'owner' or 'repo'."
@@ -151,6 +164,15 @@ class GitHubIntegration(BaseIntegration):
                 elif action == "INSPECT_REPOSITORY":
                     data = intel.inspect_repository(owner, repo)
                 
+            elif action == "CREATE_REPOSITORY":
+                name = request.arguments.get("name")
+                desc = request.arguments.get("description", "")
+                private = request.arguments.get("visibility") == "private"
+                owner = request.arguments.get("owner")
+                data = client.create_repository(name, desc, private, owner)
+                if data.get("status") == "ALREADY_EXISTS":
+                    return ActionResult(action_id=request.action_id, integration=request.integration, action_type=request.action_type, status=ActionStatus.SUCCESS, message="Repository already exists", data=data)
+                    
             elif action == "CREATE_BRANCH":
                 owner = request.arguments.get("owner")
                 repo = request.arguments.get("repo")

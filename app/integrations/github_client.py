@@ -312,3 +312,69 @@ class GitHubClient:
             "url": result.get("html_url"),
             "created": True
         }
+
+    def create_repository(self, name: str, description: str = "", private: bool = True, owner: str = None) -> dict:
+        import re
+        if not name or not name.strip():
+            raise GitHubError("EMPTY_REPOSITORY_NAME", 400)
+            
+        if len(name) > 100:
+            raise GitHubError("OVERSIZED_REPOSITORY_NAME", 400)
+            
+        if not re.match(r'^[a-zA-Z0-9_\-\.]+$', name):
+            raise GitHubError("INVALID_REPOSITORY_NAME", 400)
+            
+        if name in ('.', '..'):
+            raise GitHubError("INVALID_REPOSITORY_NAME", 400)
+            
+        target_owner = owner.strip() if owner and owner.strip() else None
+        
+        if not target_owner:
+            try:
+                user_data = self._request("GET", "/user")
+                target_owner = user_data.get("login")
+            except GitHubError:
+                pass
+                
+        if target_owner:
+            try:
+                existing = self.get_repository(target_owner, name)
+                if existing:
+                    return {
+                        "status": "ALREADY_EXISTS",
+                        "repository": f"{target_owner}/{name}",
+                        "message": "Repository already exists"
+                    }
+            except GitHubError as e:
+                if e.status_code != 404:
+                    raise e
+
+        payload = {
+            "name": name,
+            "description": description,
+            "private": private
+        }
+        
+        endpoint = "/user/repos"
+        if owner and owner.strip():
+            endpoint = f"/orgs/{owner.strip()}/repos"
+            
+        try:
+            result = self._request("POST", endpoint, json=payload)
+        except GitHubError as e:
+            if e.status_code == 422:
+                return {
+                    "status": "ALREADY_EXISTS",
+                    "message": "Repository name conflict or validation failure on GitHub."
+                }
+            raise e
+            
+        return {
+            "status": "SUCCESS",
+            "name": result.get("name"),
+            "owner": result.get("owner", {}).get("login"),
+            "visibility": result.get("visibility") or ("private" if result.get("private") else "public"),
+            "url": result.get("html_url"),
+            "id": result.get("id"),
+            "created": True
+        }

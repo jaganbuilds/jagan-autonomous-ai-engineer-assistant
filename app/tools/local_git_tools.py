@@ -1099,3 +1099,71 @@ def inspect_git_pull_result(session_id: str, remote_name: str) -> dict:
     )
     res = action_gateway.execute_action(req)
     return res.model_dump()
+
+@registry.register(requires_confirmation=True)
+def push_git_remote(session_id: str, remote_name: str, branch_name: str) -> dict:
+    if not _validate_remote_name(remote_name):
+        return {"status": "INVALID_REMOTE", "message": "Invalid remote name."}
+        
+    if not branch_name or not branch_name.strip() or branch_name.startswith('-'):
+        return {"status": "INVALID_BRANCH", "message": "Invalid branch name."}
+        
+    if ':' in branch_name or '*' in branch_name or '?' in branch_name or ' ' in branch_name or '+' in branch_name or '\\' in branch_name:
+        return {"status": "INVALID_BRANCH", "message": "Refspecs, colons, and wildcards are explicitly blocked."}
+        
+    status_dict = get_git_status(session_id)
+    if "error" in status_dict:
+        return status_dict
+        
+    if not status_dict.get("clean"):
+        return {"status": "DIRTY_WORKING_TREE", "message": "Working tree must be clean before pushing."}
+        
+    current_branch = status_dict.get("current_branch")
+    if current_branch != branch_name:
+        return {"status": "BRANCH_MISMATCH", "message": f"Must push current branch '{current_branch}', but requested '{branch_name}'"}
+        
+    commits_dict = get_git_commits(session_id, count=1)
+    if "error" in commits_dict or not commits_dict.get("commits"):
+        return {"status": "NO_COMMITS", "message": "No commits exist to push."}
+        
+    head_sha = commits_dict["commits"][0]["hash"]
+    
+    remotes_dict = get_git_remotes(session_id)
+    if "error" in remotes_dict:
+        return remotes_dict
+        
+    if remote_name not in remotes_dict.get("remotes", {}):
+        return {"status": "MISSING_REMOTE", "message": f"Remote '{remote_name}' does not exist."}
+        
+    remote_url = remotes_dict["remotes"][remote_name].get("push_url")
+    if not remote_url:
+        return {"status": "MISSING_REMOTE_URL", "message": f"Remote '{remote_name}' has no push URL configured."}
+        
+    request = ActionRequest(
+        integration="local_system",
+        action_type=ActionType.WRITE,
+        session_id=session_id,
+        arguments={
+            "operation": "git_push",
+            "remote_name": remote_name,
+            "branch_name": branch_name,
+            "expected_head_sha": head_sha,
+            "expected_remote_url": remote_url
+        },
+        requires_confirmation=True
+    )
+    
+    result = action_gateway.execute_action(request)
+    
+    if result.status == ActionStatus.WAITING_FOR_CONFIRMATION:
+        return {
+            "status": "waiting_for_confirmation",
+            "action": "git_push",
+            "message": f"Push local branch '{branch_name}' to remote '{remote_name}'?\n\nCommit: {head_sha}\nDestination URL: {remote_url}\n\nWARNING: The operation will only proceed if the current local state is clean and the remote URL remains unchanged."
+        }
+        
+    return {
+        "status": result.status.value,
+        "data": result.data if result.status.value == "SUCCESS" else None,
+        "message": result.message
+    }

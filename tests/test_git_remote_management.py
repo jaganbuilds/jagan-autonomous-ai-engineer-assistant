@@ -1,3 +1,6 @@
+from app.integrations.gateway import ActionGateway
+from app.integrations.local_system import LocalSystemIntegration
+from app.integrations.models import ActionRequest, ActionType, ActionStatus
 from app.tools.registry import registry
 import pytest
 import subprocess
@@ -27,9 +30,9 @@ def test_add_git_remote_basic(mock_settings, mock_root, temp_git_repo):
         workspace_execution_max_output_bytes = 1000
     mock_settings.return_value = MockSettings()
     
-    res = add_git_remote("sess1", "origin", "https://example.com/repo.git")
+    res = add_git_remote("sess1", "origin", "https://github.com/example/repo.git")
     assert res["status"] == "WAITING_FOR_CONFIRMATION"
-    assert "https://example.com/repo.git" in res["message"]
+    assert "https://github.com/example/repo.git" in res["message"]
 
 @mock.patch("app.integrations.local_system.LocalSystemIntegration._get_workspace_root")
 @mock.patch("app.config.get_settings")
@@ -42,10 +45,10 @@ def test_add_git_remote_sanitization(mock_settings, mock_root, temp_git_repo):
     mock_settings.return_value = MockSettings()
     
     # Tool strips password
-    res = add_git_remote("sess1", "origin", "https://user:password123@example.com/repo.git")
+    res = add_git_remote("sess1", "origin", "https://user:password123@github.com/example/repo.git")
     assert res["status"] == "WAITING_FOR_CONFIRMATION"
     assert "password123" not in res["message"]
-    assert "https://example.com/repo.git" in res["message"]
+    assert "https://github.com/example/repo.git" in res["message"]
 
 @mock.patch("app.integrations.local_system.LocalSystemIntegration._get_workspace_root")
 @mock.patch("app.config.get_settings")
@@ -57,9 +60,9 @@ def test_add_git_remote_already_exists(mock_settings, mock_root, temp_git_repo):
         workspace_execution_max_output_bytes = 1000
     mock_settings.return_value = MockSettings()
     
-    subprocess.run(["git", "remote", "add", "origin", "https://example.com/old.git"], cwd=temp_git_repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/example/old.git"], cwd=temp_git_repo, check=True)
     
-    res = add_git_remote("sess1", "origin", "https://example.com/repo.git")
+    res = add_git_remote("sess1", "origin", "https://github.com/example/repo.git")
     assert res["status"] == "FAILED"
     assert res["message"] == "REMOTE_ALREADY_EXISTS"
 
@@ -78,7 +81,7 @@ def test_add_git_remote_execution(mock_settings, mock_root, temp_git_repo):
         integration="local_system",
         action_type=ActionType.WRITE,
         session_id="sess1",
-        arguments={"operation": "git_remote_add", "name": "origin", "url": "https://example.com/repo.git"}
+        arguments={"operation": "git_remote_add", "name": "origin", "url": "https://github.com/example/repo.git"}
     )
     res = ls.execute(req)
     assert res.status == ActionStatus.SUCCESS
@@ -86,7 +89,7 @@ def test_add_git_remote_execution(mock_settings, mock_root, temp_git_repo):
     assert res.data["stdout"] == "[REDACTED BY INTEGRATION]"
     
     remotes_proc = subprocess.run(["git", "remote", "-v"], cwd=temp_git_repo, capture_output=True, text=True)
-    assert "origin\thttps://example.com/repo.git (fetch)" in remotes_proc.stdout
+    assert "origin\thttps://github.com/example/repo.git (fetch)" in remotes_proc.stdout
 
 @mock.patch("app.integrations.local_system.LocalSystemIntegration._get_workspace_root")
 @mock.patch("app.config.get_settings")
@@ -98,7 +101,7 @@ def test_remove_git_remote(mock_settings, mock_root, temp_git_repo):
         workspace_execution_max_output_bytes = 1000
     mock_settings.return_value = MockSettings()
     
-    subprocess.run(["git", "remote", "add", "origin", "https://example.com/old.git"], cwd=temp_git_repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/example/old.git"], cwd=temp_git_repo, check=True)
     
     ls = LocalSystemIntegration()
     req = ActionRequest(
@@ -137,7 +140,7 @@ def test_rename_git_remote(mock_settings, mock_root, temp_git_repo):
         workspace_execution_max_output_bytes = 1000
     mock_settings.return_value = MockSettings()
     
-    subprocess.run(["git", "remote", "add", "origin", "https://example.com/repo.git"], cwd=temp_git_repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/example/repo.git"], cwd=temp_git_repo, check=True)
     
     ls = LocalSystemIntegration()
     req = ActionRequest(
@@ -151,7 +154,7 @@ def test_rename_git_remote(mock_settings, mock_root, temp_git_repo):
     
     remotes_proc = subprocess.run(["git", "remote", "-v"], cwd=temp_git_repo, capture_output=True, text=True)
     assert "origin" not in remotes_proc.stdout
-    assert "upstream\thttps://example.com/repo.git (fetch)" in remotes_proc.stdout
+    assert "upstream\thttps://github.com/example/repo.git (fetch)" in remotes_proc.stdout
 
 @mock.patch("app.integrations.local_system.LocalSystemIntegration._get_workspace_root")
 @mock.patch("app.config.get_settings")
@@ -163,40 +166,40 @@ def test_set_git_remote_url(mock_settings, mock_root, temp_git_repo):
         workspace_execution_max_output_bytes = 1000
     mock_settings.return_value = MockSettings()
     
-    subprocess.run(["git", "remote", "add", "origin", "https://example.com/repo.git"], cwd=temp_git_repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/example/repo.git"], cwd=temp_git_repo, check=True)
     
     ls = LocalSystemIntegration()
     req = ActionRequest(
         integration="local_system",
         action_type=ActionType.WRITE,
         session_id="sess1",
-        arguments={"operation": "git_remote_set_url", "name": "origin", "url": "https://example.com/new.git"}
+        arguments={"operation": "git_remote_set_url", "name": "origin", "url": "https://github.com/example/new.git"}
     )
     res = ls.execute(req)
     assert res.status == ActionStatus.SUCCESS
     
     remotes_proc = subprocess.run(["git", "remote", "-v"], cwd=temp_git_repo, capture_output=True, text=True)
-    assert "origin\thttps://example.com/new.git (fetch)" in remotes_proc.stdout
+    assert "origin\thttps://github.com/example/new.git (fetch)" in remotes_proc.stdout
 
 def test_git_remote_validation_logic():
     ls = LocalSystemIntegration()
     
     # Valid
-    valid, err = ls.validate_arguments(ActionType.WRITE, {"operation": "git_remote_add", "name": "origin", "url": "https://example.com"})
+    valid, err = ls.validate_arguments(ActionType.WRITE, {"operation": "git_remote_add", "name": "origin", "url": "https://github.com/example"})
     assert valid is True
     
     # Invalid name
-    valid, err = ls.validate_arguments(ActionType.WRITE, {"operation": "git_remote_add", "name": "-origin", "url": "https://example.com"})
+    valid, err = ls.validate_arguments(ActionType.WRITE, {"operation": "git_remote_add", "name": "-origin", "url": "https://github.com/example"})
     assert valid is False
     
-    valid, err = ls.validate_arguments(ActionType.WRITE, {"operation": "git_remote_add", "name": "ori gin", "url": "https://example.com"})
+    valid, err = ls.validate_arguments(ActionType.WRITE, {"operation": "git_remote_add", "name": "ori gin", "url": "https://github.com/example"})
     assert valid is False
     
-    valid, err = ls.validate_arguments(ActionType.WRITE, {"operation": "git_remote_add", "name": "origin;", "url": "https://example.com"})
+    valid, err = ls.validate_arguments(ActionType.WRITE, {"operation": "git_remote_add", "name": "origin;", "url": "https://github.com/example"})
     assert valid is False
     
     # Invalid URL
-    valid, err = ls.validate_arguments(ActionType.WRITE, {"operation": "git_remote_add", "name": "origin", "url": "-https://example.com"})
+    valid, err = ls.validate_arguments(ActionType.WRITE, {"operation": "git_remote_add", "name": "origin", "url": "-https://github.com/example"})
     assert valid is False
 
 
@@ -212,7 +215,7 @@ def test_add_git_remote_invalid_name(mock_settings, mock_root, temp_git_repo):
         workspace_execution_max_output_bytes = 1000
     mock_settings.return_value = MockSettings()
     
-    res = add_git_remote("sess1", "-origin", "https://example.com/repo.git")
+    res = add_git_remote("sess1", "-origin", "https://github.com/example/repo.git")
     assert res["status"] == "FAILED"
     assert res["message"] == "INVALID_REMOTE_NAME"
 
@@ -226,7 +229,7 @@ def test_add_git_remote_invalid_url(mock_settings, mock_root, temp_git_repo):
         workspace_execution_max_output_bytes = 1000
     mock_settings.return_value = MockSettings()
     
-    res = add_git_remote("sess1", "origin", "-https://example.com/repo.git")
+    res = add_git_remote("sess1", "origin", "-https://github.com/example/repo.git")
     assert res["status"] == "FAILED"
     assert res["message"] == "INVALID_REMOTE_URL"
     
@@ -240,7 +243,7 @@ def test_add_git_remote_shell_injection(mock_settings, mock_root, temp_git_repo)
         workspace_execution_max_output_bytes = 1000
     mock_settings.return_value = MockSettings()
     
-    res = add_git_remote("sess1", "origin;git push", "https://example.com/repo.git")
+    res = add_git_remote("sess1", "origin;git push", "https://github.com/example/repo.git")
     assert res["status"] == "FAILED"
     assert res["message"] == "INVALID_REMOTE_NAME"
 
@@ -282,8 +285,8 @@ def test_rename_git_remote_already_exists(mock_settings, mock_root, temp_git_rep
         workspace_execution_max_output_bytes = 1000
     mock_settings.return_value = MockSettings()
     
-    subprocess.run(["git", "remote", "add", "origin", "https://example.com/repo.git"], cwd=temp_git_repo, check=True)
-    subprocess.run(["git", "remote", "add", "upstream", "https://example.com/repo2.git"], cwd=temp_git_repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/example/repo.git"], cwd=temp_git_repo, check=True)
+    subprocess.run(["git", "remote", "add", "upstream", "https://github.com/example/repo2.git"], cwd=temp_git_repo, check=True)
     
     res = rename_git_remote("sess1", "origin", "upstream")
     assert res["status"] == "FAILED"
@@ -299,9 +302,9 @@ def test_set_git_remote_url_invalid(mock_settings, mock_root, temp_git_repo):
         workspace_execution_max_output_bytes = 1000
     mock_settings.return_value = MockSettings()
     
-    subprocess.run(["git", "remote", "add", "origin", "https://example.com/repo.git"], cwd=temp_git_repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/example/repo.git"], cwd=temp_git_repo, check=True)
     
-    res = set_git_remote_url("sess1", "origin", "-https://example.com/repo.git")
+    res = set_git_remote_url("sess1", "origin", "-https://github.com/example/repo.git")
     assert res["status"] == "FAILED"
     assert res["message"] == "INVALID_REMOTE_URL"
 
@@ -315,7 +318,7 @@ def test_set_git_remote_url_not_found(mock_settings, mock_root, temp_git_repo):
         workspace_execution_max_output_bytes = 1000
     mock_settings.return_value = MockSettings()
     
-    res = set_git_remote_url("sess1", "origin", "https://example.com/repo.git")
+    res = set_git_remote_url("sess1", "origin", "https://github.com/example/repo.git")
     assert res["status"] == "FAILED"
     assert res["message"] == "REMOTE_NOT_FOUND"
 
@@ -330,14 +333,14 @@ def test_add_git_remote_toctou(mock_settings, mock_root, temp_git_repo):
     mock_settings.return_value = MockSettings()
     
     # Pre-flight is clean, but right before execution, another process adds it
-    subprocess.run(["git", "remote", "add", "origin", "https://example.com/old.git"], cwd=temp_git_repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/example/old.git"], cwd=temp_git_repo, check=True)
     
     ls = LocalSystemIntegration()
     req = ActionRequest(
         integration="local_system",
         action_type=ActionType.WRITE,
         session_id="sess1",
-        arguments={"operation": "git_remote_add", "name": "origin", "url": "https://example.com/repo.git"}
+        arguments={"operation": "git_remote_add", "name": "origin", "url": "https://github.com/example/repo.git"}
     )
     res = ls.execute(req)
     assert res.status == ActionStatus.FAILED
@@ -371,7 +374,7 @@ def test_no_network_calls(mock_settings, mock_root, temp_git_repo):
             integration="local_system",
             action_type=ActionType.WRITE,
             session_id="sess1",
-            arguments={"operation": "git_remote_add", "name": "origin", "url": "https://example.com/repo.git"}
+            arguments={"operation": "git_remote_add", "name": "origin", "url": "https://github.com/example/repo.git"}
         )
         res = ls.execute(req)
         assert res.status == ActionStatus.SUCCESS, f"Failed: {res.message}"
@@ -380,7 +383,7 @@ def test_no_network_calls(mock_settings, mock_root, temp_git_repo):
         for cmd in called_cmds:
             if cmd[:3] == ["git", "remote", "add"]:
                 found_add = True
-                assert cmd == ["git", "remote", "add", "origin", "https://example.com/repo.git"]
+                assert cmd == ["git", "remote", "add", "origin", "https://github.com/example/repo.git"]
         assert found_add, "git remote add was not called"
 
 def test_tool_registration():
@@ -394,3 +397,54 @@ def test_tool_registration():
     assert registry._requires_confirmation["rename_git_remote"] is True
     assert registry._requires_confirmation["set_git_remote_url"] is True
 
+
+from unittest import mock
+@mock.patch("app.integrations.local_system.LocalSystemIntegration._get_workspace_root")
+@mock.patch("app.config.get_settings")
+def test_git_remote_duplicate_action(mock_settings, mock_root, temp_git_repo):
+    mock_root.return_value = temp_git_repo
+    gateway = ActionGateway()
+    gateway.register_integration(LocalSystemIntegration())
+    
+    uniq = str(id(mock_root))
+    req = ActionRequest(
+        action_id="remote_dup_" + uniq,
+        integration="local_system",
+        action_type=ActionType.WRITE,
+        session_id="r_dup_" + uniq,
+        owner_id="owner",
+        arguments={"operation": "git_remote_add", "name": "neworigin", "url": "https://github.com/a/b.git"}
+    )
+    
+    res1 = gateway.execute_action(req)
+    assert res1.status == ActionStatus.WAITING_FOR_CONFIRMATION
+    conf = gateway.confirm_pending_action("r_dup_" + uniq)
+    assert conf.status == ActionStatus.SUCCESS
+    
+    res2 = gateway.execute_action(req)
+    assert res2.status == ActionStatus.SUCCESS
+
+@mock.patch("app.integrations.local_system.LocalSystemIntegration._get_workspace_root")
+@mock.patch("app.config.get_settings")
+def test_git_remote_crash_recovery(mock_settings, mock_root, temp_git_repo):
+    mock_root.return_value = temp_git_repo
+    gateway = ActionGateway()
+    gateway.register_integration(LocalSystemIntegration())
+    
+    req = ActionRequest(
+        action_id="remote_crash",
+        integration="local_system",
+        action_type=ActionType.WRITE,
+        session_id="r_crash",
+        owner_id="owner",
+        arguments={"operation": "git_remote_add", "name": "crashorigin", "url": "https://github.com/a/b.git"}
+    )
+    
+    gateway.execute_action(req)
+    
+    from app.integrations.gateway import action_repository
+    action_repository.update_status("remote_crash", "EXECUTING")
+    
+    res2 = gateway.execute_action(req)
+    assert res2.status == ActionStatus.FAILED
+    assert "FAILED_RECOVERY" in res2.message

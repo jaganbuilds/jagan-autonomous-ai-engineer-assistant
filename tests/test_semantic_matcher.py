@@ -11,7 +11,7 @@ from app.matching.semantic_matcher import SemanticJobMatcher
 def matcher():
     with patch('app.matching.semantic_matcher.get_settings') as mock_settings:
         mock_settings.return_value.gemini_api_key = "fake_key"
-        with patch('app.matching.semantic_matcher.genai.Client') as mock_client:
+        with patch('app.llm_client.get_llm_client') as mock_client:
             sem_matcher = SemanticJobMatcher()
             sem_matcher.client = MagicMock()
             return sem_matcher

@@ -11,9 +11,8 @@ from app.tools.registry import registry
 
 @pytest.fixture
 def mock_proposer():
-    # Use deterministic fallback for fast logical tests by setting api_key to mock
-    with mock.patch("app.config.get_settings") as mock_settings:
-        mock_settings.return_value.gemini_api_key = "mock_key"
+    # Force deterministic fallback for fast logical tests
+    with mock.patch("app.llm_client.get_llm_client_or_raise", side_effect=Exception("force fallback")):
         yield GitCommitProposer()
 
 def test_no_changes(mock_proposer):
@@ -94,7 +93,7 @@ def test_truncated_diff(mock_proposer):
         assert proposal["truncated_info"] is True
         assert "truncated" in proposal["change_summary"].lower()
 
-@mock.patch("app.services.git_commit_proposer.genai.Client")
+@mock.patch("app.llm_client.get_llm_client_or_raise")
 def test_llm_generation(mock_client_class):
     # Setup live proposer
     with mock.patch("app.config.get_settings") as mock_settings:
@@ -123,17 +122,17 @@ def test_llm_generation(mock_client_class):
         assert res["status"] == "SUCCESS"
         assert res["proposal"]["proposed_commit_message"] == "feat: add new feature"
 
-@mock.patch("app.services.git_commit_proposer.genai.Client")
-def test_llm_malformed_output_fallback(mock_client_class):
+def test_llm_malformed_output_fallback(monkeypatch):
+    from unittest.mock import MagicMock
     with mock.patch("app.config.get_settings") as mock_settings:
         mock_settings.return_value.gemini_api_key = "valid_key"
         proposer = GitCommitProposer()
         
-    mock_client = mock.Mock()
-    mock_client_class.return_value = mock_client
-    mock_response = mock.Mock()
+    mock_client = MagicMock()
+    mock_response = MagicMock()
     mock_response.text = "NOT JSON"
     mock_client.models.generate_content.return_value = mock_response
+    monkeypatch.setattr('app.llm_client.get_llm_client_or_raise', lambda: mock_client)
     
     with mock.patch("app.services.git_commit_proposer.get_git_status") as m_status, \
          mock.patch("app.services.git_commit_proposer.get_git_diff_staged") as m_staged, \

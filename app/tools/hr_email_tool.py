@@ -98,7 +98,8 @@ Missing Skills: {', '.join(match_res.missing_skills)}
         if match_res.semantic_analysis and match_res.semantic_analysis.semantically_related_skills:
             prompt += f"Semantically Related Skills: {', '.join(match_res.semantic_analysis.semantically_related_skills)}\n"
             
-    client = genai.Client(api_key=settings.gemini_api_key)
+    from app.llm_client import get_llm_client_or_raise
+    client = get_llm_client_or_raise()
     try:
         response = client.models.generate_content(
             model="gemini-2.5-flash",

@@ -12,12 +12,14 @@ def manager():
     # Ensure api key is set for testing or mock it
     with patch("app.agents.manager.get_settings") as mock_settings:
         mock_settings.return_value.gemini_api_key = "test_key"
-        mgr = ManagerAgent()
-        
-        # Mock the SDK client's chat mechanism
-        mock_chat = MagicMock()
-        mgr._get_chat = MagicMock(return_value=mock_chat)
-        return mgr
+        with patch("app.llm_client.get_llm_client") as mock_llm_client:
+            mock_llm_client.return_value = MagicMock()
+            mgr = ManagerAgent()
+            
+            # Mock the SDK client's chat mechanism
+            mock_chat = MagicMock()
+            mgr._get_chat = MagicMock(return_value=mock_chat)
+            return mgr
 
 def test_manager_normal_flow(manager):
     session_id = "test_normal"
@@ -459,7 +461,7 @@ def test_manager_email_draft_flow(manager):
     
     mock_chat.send_message.side_effect = [call_response, final_response]
     
-    with patch("app.tools.hr_email_tool.genai.Client") as mock_client:
+    with patch("app.llm_client.get_llm_client_or_raise") as mock_client:
         mock_response = MagicMock()
         mock_response.text = '{"subject": "Application", "body": "My draft", "recipient": null, "job_id": "job_1"}'
         mock_client.return_value.models.generate_content.return_value = mock_response

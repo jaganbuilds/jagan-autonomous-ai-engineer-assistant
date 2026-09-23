@@ -1,7 +1,7 @@
 from typing import Dict, Any, Optional
 from app.tools import registry
 from app.integrations.gateway import action_gateway
-from app.integrations.models import ActionRequest, ActionType
+from app.integrations.models import ActionRequest, ActionType, ActionStatus
 
 @registry.register(requires_confirmation=False)
 def list_github_repositories(session_id: str) -> Dict[str, Any]:
@@ -324,6 +324,41 @@ def create_github_pull_request(session_id: str, owner: str, repo: str, title: st
             "action": "create_github_pull_request",
             "message": f"This will create a pull request in {owner}/{repo}.\n\nRepository: {owner}/{repo}\nHead: {head}\nBase: {base}\nTitle: {title}\n\nDo you want me to continue?"
         }
+    return {
+        "status": result.status.value,
+        "data": result.data if result.status.value == "SUCCESS" else None,
+        "message": result.message
+    }
+
+@registry.register(requires_confirmation=True)
+def create_github_repository(session_id: str, name: str, description: str = "", visibility: str = "private", owner: str = None) -> dict:
+    if visibility not in ("public", "private"):
+        return {"status": "INVALID_VISIBILITY", "message": "Visibility must be 'public' or 'private'"}
+        
+    request = ActionRequest(
+        integration="github",
+        action_type=ActionType.WRITE,
+        session_id=session_id,
+        arguments={
+            "action": "CREATE_REPOSITORY",
+            "name": name,
+            "description": description,
+            "visibility": visibility,
+            "owner": owner
+        },
+        requires_confirmation=True
+    )
+    
+    result = action_gateway.execute_action(request)
+    
+    if result.status == ActionStatus.WAITING_FOR_CONFIRMATION:
+        owner_display = owner if owner else "[Authenticated User]"
+        return {
+            "status": "waiting_for_confirmation",
+            "action": "create_github_repository",
+            "message": f"This will create a new {visibility} GitHub repository named '{name}' for owner '{owner_display}'.\n\nName: {name}\nVisibility: {visibility}\nDescription: {description}\n\nDo you want me to continue?"
+        }
+        
     return {
         "status": result.status.value,
         "data": result.data if result.status.value == "SUCCESS" else None,

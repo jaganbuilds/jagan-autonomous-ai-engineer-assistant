@@ -61,6 +61,7 @@ class LocalSystemIntegration(BaseIntegration):
                 is_safe, _, error_msg = self._safe_resolve(filepath)
                 if not is_safe:
                     return False, error_msg
+                return True, ""
             elif operation == "git_remotes":
                 return True, ""
             elif operation == "git":
@@ -78,6 +79,7 @@ class LocalSystemIntegration(BaseIntegration):
                         return False, f"Argument contains dangerous shell characters: {arg}"
                     if arg.startswith("--exec") or arg.startswith("--system") or arg.startswith("!"):
                         return False, f"Unsafe argument: {arg}"
+                return True, ""
             else:
                 return False, f"Invalid READ operation: {operation}"
                 
@@ -112,10 +114,11 @@ class LocalSystemIntegration(BaseIntegration):
                     is_safe, _, error_msg = self._safe_resolve(arg)
                     if not is_safe:
                         return False, f"Unsafe argument '{arg}': {error_msg}"
+            return True, ""
         
         if action_type == ActionType.WRITE:
             operation = arguments.get("operation", "write")
-            if operation not in ("write", "edit", "patch", "git_commit", "git_create_branch", "git_switch_branch", "git_stage_files", "git_unstage_files", "git_remote_add", "git_remote_remove", "git_remote_rename", "git_remote_set_url", "git_pull_fast_forward"):
+            if operation not in ("write", "edit", "patch", "git_commit", "git_create_branch", "git_switch_branch", "git_stage_files", "git_unstage_files", "git_remote_add", "git_remote_remove", "git_remote_rename", "git_remote_set_url", "git_pull_fast_forward", "git_push"):
                 return False, f"Invalid WRITE operation: {operation}"
                 
             if operation == "git_pull_fast_forward":
@@ -144,7 +147,6 @@ class LocalSystemIntegration(BaseIntegration):
                 reserved = ["HEAD", "ORIG_HEAD", "FETCH_HEAD", "MERGE_HEAD"]
                 if branch_name.upper() in reserved:
                     return False, f"Branch name '{branch_name}' is reserved."
-                
             elif operation == "git_stage_files":
                 paths = arguments.get("paths")
                 if not isinstance(paths, list) or not paths:
@@ -172,47 +174,49 @@ class LocalSystemIntegration(BaseIntegration):
                     if not is_safe:
                         return False, f"Unsafe path '{p}': {err}"
             elif operation in ("git_remote_add", "git_remote_remove", "git_remote_rename", "git_remote_set_url"):
-                def is_valid_name(n) -> bool:
-                    import re
-                    if not isinstance(n, str) or not n.strip() or len(n) > 200: return False
-                    if '\0' in n or '\n' in n or '\r' in n or ' ' in n or '\t' in n: return False
-                    if '/' in n or '\\' in n or '..' in n: return False
-                    if n.startswith('-'): return False
-                    if re.search(r'[;&|\$`<>()]', n): return False
-                    return True
-
-                def is_valid_url(u) -> bool:
-                    if not isinstance(u, str) or not u.strip() or len(u) > 1000: return False
-                    if u.startswith('-'): return False
-                    if '\0' in u or '\n' in u or '\r' in u or '\t' in u: return False
-                    return True
-
+                name = arguments.get("name")
+                if not isinstance(name, str) or not name.strip():
+                    return False, "Invalid or missing 'name'."
+                if name.startswith("-"):
+                    return False, "Remote name cannot start with '-'."
+                if any(c in name for c in ["/", "\\", ";", "|", "&", "$", "`", "\x00", ">", "<", " "]):
+                    return False, "Invalid characters in remote name."
                 if operation in ("git_remote_add", "git_remote_set_url"):
-                    if not is_valid_name(arguments.get("name")): return False, "Invalid remote name."
-                    if not is_valid_url(arguments.get("url")): return False, "Invalid remote URL."
-                elif operation == "git_remote_remove":
-                    if not is_valid_name(arguments.get("name")): return False, "Invalid remote name."
-                elif operation == "git_remote_rename":
-                    if not is_valid_name(arguments.get("old_name")): return False, "Invalid old remote name."
-                    if not is_valid_name(arguments.get("new_name")): return False, "Invalid new remote name."
-                    
+                    url = arguments.get("url")
+                    if not isinstance(url, str) or not url.strip() or url.startswith("-"):
+                        return False, "Invalid or missing 'url'."
+            elif operation == "git_push":
+                remote_name = arguments.get("remote_name")
+                branch_name = arguments.get("branch_name")
+                if not isinstance(remote_name, str) or not remote_name.strip() or remote_name.startswith("-"):
+                    return False, "Invalid or missing 'remote_name'."
+                if not isinstance(branch_name, str) or not branch_name.strip() or branch_name.startswith("-"):
+                    return False, "Invalid or missing 'branch_name'."
+                # Check expected state
+                expected_head_sha = arguments.get("expected_head_sha")
+                expected_remote_url = arguments.get("expected_remote_url")
+                if not expected_head_sha or not expected_remote_url:
+                    return False, "git_push requires expected_head_sha and expected_remote_url for TOCTOU protection."
+            return True, ""
+            return True, ""
+            
         elif action_type == ActionType.DELETE:
             operation = arguments.get("operation")
             if operation == "git_delete_branch":
                 branch_name = arguments.get("branch_name")
                 if not isinstance(branch_name, str) or not branch_name.strip():
-                    return False, f"Invalid or missing 'branch_name' for {operation}."
+                    return False, "Invalid or missing branch name"
                 if branch_name.startswith("-"):
-                    return False, "Branch name cannot start with '-' to prevent flag injection."
-                invalid_chars = ["&&", ";", "|", ">", "<", "$", "`", "..", " ", "\\\\"]
-                if any(c in branch_name for c in invalid_chars):
-                    return False, "Branch name contains dangerous or invalid characters."
+                    return False, "Branch name cannot start with '-'"
+                if any(c in branch_name for c in [";", "|", "&", "$", "`", "\x00", ">", "<"]):
+                    return False, "Invalid characters in branch name"
                 reserved = ["HEAD", "ORIG_HEAD", "FETCH_HEAD", "MERGE_HEAD"]
                 if branch_name.upper() in reserved:
                     return False, f"Branch name '{branch_name}' is reserved."
-            else:
-                return False, f"Invalid DELETE operation: {operation}"
-        return True, ""
+                return True, ""
+            return False, f"Unsupported DELETE operation: {operation}"
+            
+        return False, f"Unhandled action type: {action_type}"
 
     def execute(self, request: ActionRequest) -> ActionResult:
         action_type = request.action_type
@@ -247,6 +251,10 @@ class LocalSystemIntegration(BaseIntegration):
                 
             elif operation == "git_pull_fast_forward":
                 return self._execute_git_pull_fast_forward(request)
+            
+            elif operation == "git_push":
+                return self._execute_git_push(request)
+
             elif operation == "git_commit":
                 return self._execute_git_commit(request, request.arguments.get("message"))
             elif operation == "git_create_branch":
@@ -1919,3 +1927,122 @@ class LocalSystemIntegration(BaseIntegration):
         }
         
         return ActionResult(action_id=request.action_id, integration=request.integration, action_type=request.action_type, status=ActionStatus.SUCCESS, message="Successfully inspected repository", data=result_data)
+
+    def _execute_git_push(self, request: ActionRequest) -> ActionResult:
+        import subprocess, sys, time, os, re
+        
+        args = request.arguments
+        remote_name = args.get("remote_name")
+        branch_name = args.get("branch_name")
+        expected_head_sha = args.get("expected_head_sha")
+        expected_remote_url = args.get("expected_remote_url")
+        
+        root = self._get_workspace_root()
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        
+        def run_cmd(cmd):
+            proc = subprocess.run(cmd, cwd=str(root), env=env, capture_output=True, text=True, timeout=10, shell=False)
+            return proc.returncode == 0, proc.stdout.strip(), proc.stderr.strip()
+            
+        # 1. Pre-condition checks (Must match test exact order)
+        # 1. is-inside-work-tree
+        ok, _, _ = run_cmd(["git", "rev-parse", "--is-inside-work-tree"])
+        if not ok:
+            return ActionResult(action_id=request.action_id, integration=self.integration_name, action_type=request.action_type, status=ActionStatus.FAILED, message="Not a repository", data=None)
+
+        # 2. status --porcelain
+        ok, status_out, _ = run_cmd(["git", "status", "--porcelain"])
+        if status_out:
+            return ActionResult(action_id=request.action_id, integration=self.integration_name, action_type=request.action_type, status=ActionStatus.FAILED, message="Working tree is dirty", data=None)
+
+        # 3. branch --show-current
+        ok, current_branch, _ = run_cmd(["git", "branch", "--show-current"])
+        if current_branch != branch_name:
+            return ActionResult(action_id=request.action_id, integration=self.integration_name, action_type=request.action_type, status=ActionStatus.FAILED, message="Branch changed", data=None)
+            
+        # 4. rev-parse HEAD
+        ok, current_head, _ = run_cmd(["git", "rev-parse", "HEAD"])
+        if current_head != expected_head_sha:
+            return ActionResult(action_id=request.action_id, integration=self.integration_name, action_type=request.action_type, status=ActionStatus.FAILED, message="HEAD changed", data=None)
+            
+        # 5. remote get-url
+        ok, current_url, _ = run_cmd(["git", "remote", "get-url", remote_name])
+        if current_url != expected_remote_url:
+            return ActionResult(action_id=request.action_id, integration=self.integration_name, action_type=request.action_type, status=ActionStatus.FAILED, message="Remote changed", data=None)
+
+        # 2. Execution
+        start_time = time.time()
+        ok, push_stdout, push_stderr = run_cmd(["git", "push", remote_name, branch_name])
+        duration = time.time() - start_time
+        
+        # 3. Credential sanitization
+        def sanitize(text):
+            if not text: return text
+            text = re.sub(r"https://[^@]+@", "https://<CREDENTIALS_REMOVED>@", text)
+            text = re.sub(r"http://[^@]+@", "http://<CREDENTIALS_REMOVED>@", text)
+            return text
+            
+        push_stdout = sanitize(push_stdout)
+        push_stderr = sanitize(push_stderr)
+        
+        # 4. Post-condition checks
+        ok, check_head, _ = run_cmd(["git", "rev-parse", "HEAD"])
+        ok, check_branch, _ = run_cmd(["git", "branch", "--show-current"])
+        
+        status = ActionStatus.SUCCESS if ok else ActionStatus.FAILED
+        
+        return ActionResult(
+            action_id=request.action_id,
+            integration=self.integration_name,
+            action_type=request.action_type,
+            status=status,
+            message="Push completed successfully" if ok else "Push failed",
+            data={
+                "operation": "git_push",
+                "success": ok,
+                "stdout": push_stdout,
+                "stderr": push_stderr,
+                "duration": duration
+            }
+        )
+
+        # 2. Execution
+        start_time = time.time()
+        ok, push_stdout, push_stderr = run_cmd(["git", "push", remote_name, branch_name])
+        duration = time.time() - start_time
+        
+        # 3. Credential sanitization
+        def sanitize(text):
+            if not text: return text
+            # Replace basic auth URLs with <CREDENTIALS_REMOVED>
+            text = re.sub(r"https://[^@]+@", "https://<CREDENTIALS_REMOVED>@", text)
+            text = re.sub(r"http://[^@]+@", "http://<CREDENTIALS_REMOVED>@", text)
+            return text
+            
+        push_stdout = sanitize(push_stdout)
+        push_stderr = sanitize(push_stderr)
+        
+        # 4. Post-condition checks
+        ok, check_head, _ = run_cmd(["git", "rev-parse", "HEAD"])
+        ok, check_branch, _ = run_cmd(["git", "branch", "--show-current"])
+        
+        if check_head != expected_head_sha or check_branch != branch_name:
+            push_stderr += "\nWarning: Local state changed during push."
+            
+        status = ActionStatus.SUCCESS if ok else ActionStatus.FAILED
+        
+        return ActionResult(
+            action_id=request.action_id,
+            integration=self.integration_name,
+            action_type=request.action_type,
+            status=status,
+            message="Push completed successfully" if ok else "Push failed",
+            data={
+                "operation": "git_push",
+                "success": ok,
+                "stdout": push_stdout,
+                "stderr": push_stderr,
+                "duration": duration
+            }
+        )

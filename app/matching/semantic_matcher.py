@@ -21,9 +21,8 @@ class SemanticJobMatcher:
     def __init__(self):
         settings = get_settings()
         self.api_key = settings.gemini_api_key
-        self.client = None
-        if self.api_key:
-             self.client = genai.Client(api_key=self.api_key)
+        from app.llm_client import get_llm_client
+        self.client = get_llm_client()
         self.model = 'gemini-2.5-flash'
 
     def analyze(self, job: Job, profile: CandidateProfile, deterministic_match: MatchResult) -> Optional[SemanticMatchResult]:
