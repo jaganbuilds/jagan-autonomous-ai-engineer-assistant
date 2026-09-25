@@ -28,7 +28,7 @@ class MockJobSource(BaseJobSource):
                 company="StartupInc",
                 location="Chennai",
                 experience="0-2 years",
-                description="Build LLM applications using Langchain and Gemini API.",
+                description="Build LLM applications using Langchain and LLM API.",
                 url="https://example.com/jobs/3", source="mock", external_id="mock_3"
             ),
             Job(

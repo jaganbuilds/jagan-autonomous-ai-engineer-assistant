@@ -2,8 +2,6 @@ import json
 import logging
 from typing import Dict, Any, List
 from pydantic import BaseModel, Field
-from google import genai
-from google.genai import types
 
 from app.tools.local_git_tools import get_git_status, get_git_diff_unstaged, get_git_diff_staged
 from app.config import get_settings
@@ -32,7 +30,7 @@ class GitCommitProposer:
     """
     def __init__(self):
         settings = get_settings()
-        self.api_key = settings.gemini_api_key
+        self.api_key = settings.openrouter_api_key
 
     def propose_commit(self, session_id: str) -> Dict[str, Any]:
         status_res = get_git_status(session_id)
@@ -151,18 +149,9 @@ RULES:
 """
         
         try:
-            from app.llm_client import get_llm_client_or_raise
-            client = get_llm_client_or_raise()
-            response = client.models.generate_content(
-                model='gemini-1.5-flash',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json"
-                )
-            )
+            from app.llm.gateway import gateway
             
-            data = json.loads(response.text)
+            data = gateway.generate_json(prompt, temperature=0.0)
             
             return CommitProposal(
                 branch=branch,

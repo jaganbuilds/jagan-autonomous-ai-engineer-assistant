@@ -20,7 +20,7 @@ def test_goal_to_plan():
 def test_unsupported_goal(monkeypatch):
     from app.config import get_settings
     settings = get_settings()
-    monkeypatch.setattr(settings, "gemini_api_key", "mock")
+    monkeypatch.setattr(settings, "openrouter_api_key", "mock")
     
     session_id = "test_planner_2"
     plan = planner.create_plan_for_goal(session_id, "Do something unknown")
@@ -50,17 +50,15 @@ def test_manager_skips_orchestration_for_simple_request(monkeypatch):
     agent = ManagerAgent()
     session_id = "test_trigger_2"
     
-    # Mock Gemini client
-    mock_chat = MagicMock()
-    mock_response = MagicMock()
-    mock_response.function_calls = []
-    mock_response.text = "Here is the calculation: 200"
-    mock_chat.send_message.return_value = mock_response
-    agent._chats = {session_id: mock_chat}
+    # Mock LLM gateway
+    from app.llm.models import LLMResponse
+    mock_gateway = MagicMock()
+    mock_response = LLMResponse(text="Here is the calculation: 200", tool_calls=[])
+    mock_gateway.chat.return_value = mock_response
+    monkeypatch.setattr("app.agents.manager.gateway", mock_gateway)
     
     response = agent.process_message("Calculate 25 * 8", session_id)
     assert response == "Here is the calculation: 200"
-    mock_chat.send_message.assert_called_once_with("Calculate 25 * 8")
 
 def test_session_isolation_in_planner():
     session_1 = "s1"

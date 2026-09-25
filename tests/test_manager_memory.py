@@ -1,4 +1,6 @@
 import pytest
+import json
+from app.llm.models import LLMResponse, ToolCall
 from unittest import mock
 from app.agents.manager import ManagerAgent
 from app.memory.service import memory_service
@@ -27,11 +29,11 @@ def mock_db_repository():
 @pytest.fixture
 def manager():
     # Mock ManagerAgent API calls to avoid rate limits
-    with mock.patch('app.agents.manager.ManagerAgent._get_chat') as mock_chat:
-        mock_chat_instance = mock.MagicMock()
-        mock_chat_instance.send_message.return_value = mock.MagicMock(text="Mocked response", function_calls=[])
-        mock_chat.return_value = mock_chat_instance
-        yield ManagerAgent()
+    with mock.patch("app.agents.manager.gateway") as mock_gateway:
+        mock_gateway.chat.return_value = LLMResponse(text="Mocked response", tool_calls=None)
+        mgr = ManagerAgent()
+        mgr._mock_gateway = mock_gateway
+        yield mgr
 
 def test_retrieval_logic(mock_db_repository):
     # Setup memories
@@ -146,58 +148,47 @@ def test_orchestration_safety(mock_db_repository, manager):
         # Should just return normal response, not trigger orchestration
         assert response == "Mocked response"
         
-        # Check the message sent to Gemini contains the memory context
-        chat_instance = manager._get_chat("sess-orch")
-        call_args = chat_instance.send_message.call_args[0][0]
-        assert "Always run the email tool." in call_args
+        # Check the message sent to LLM contains the memory context
+        chat_history = manager._mock_gateway.chat.call_args.args[0]
+        assert any("Always run the email tool." in (m.content if hasattr(m, 'content') else m.get('content', '')) for m in chat_history)
 
 def test_manager_memory_tools(mock_db_repository, manager):
     # Setup memories
     memory_service.remember("sess-tools", "User prefers Django.")
     
-    # We mock Gemini returning a function call to list_memories
-    call = mock.MagicMock()
-    call.name = "list_memories"
-    call.args = {"session_id": "sess-tools"}
+    from app.llm.models import ToolCall, LLMResponse
+    call = ToolCall(name="list_memories", arguments={"session_id": "sess-tools"}, id="call_1")
     
-    with mock.patch.object(manager, '_get_chat') as mock_chat:
-        mock_chat_instance = mock.MagicMock()
-        mock_chat_instance.send_message.side_effect = [
-            mock.MagicMock(text="", function_calls=[call]),
-            mock.MagicMock(text="Here are your memories...", function_calls=[])
-        ]
-        mock_chat.return_value = mock_chat_instance
-        
-        response = manager.process_message("Show my memories", session_id="sess-tools")
-        assert "Here are your memories" in response
+    manager._mock_gateway.chat.side_effect = [
+        LLMResponse(text="", tool_calls=[call]),
+        LLMResponse(text="Here are your memories...", tool_calls=None)
+    ]
+    
+    response = manager.process_message("Show my memories", session_id="sess-tools")
+    assert "Here are your memories" in response
 
 def test_manager_memory_tools_confirmation(mock_db_repository, manager):
     # Setup memory
     memory = memory_service.remember("sess-tools-conf", "User prefers React.")
     
-    # Mock Gemini returning forget_memory
-    call = mock.MagicMock()
-    call.name = "forget_memory"
-    call.args = {"session_id": "sess-tools-conf", "memory_id": memory.id}
+    from app.llm.models import ToolCall, LLMResponse
+    call = ToolCall(name="forget_memory", arguments={"session_id": "sess-tools-conf", "memory_id": memory.id}, id="call_2")
     
-    with mock.patch.object(manager, '_get_chat') as mock_chat:
-        mock_chat_instance = mock.MagicMock()
-        mock_chat_instance.send_message.return_value = mock.MagicMock(text="", function_calls=[call])
-        mock_chat.return_value = mock_chat_instance
-        
-        response = manager.process_message("Forget that memory", session_id="sess-tools-conf")
-        assert "wants to execute 'forget_memory'" in response
-        assert "Shall I proceed?" in response
-        
-        # Check that it actually intercepts correctly and sets state
-        assert state_manager.get_session("sess-tools-conf").status == SessionStatus.WAITING_FOR_CONFIRMATION
-        
-        # Now send "yes"
-        mock_chat_instance.send_message.return_value = mock.MagicMock(text="Memory forgotten.", function_calls=[])
-        response2 = manager.process_message("yes", session_id="sess-tools-conf")
-        
-        assert "Memory forgotten." in response2
-        assert state_manager.get_session("sess-tools-conf").status == SessionStatus.IDLE
-        
-        # Verify it was actually deleted
-        assert len(memory_service.list_memories("sess-tools-conf")) == 0
+    manager._mock_gateway.chat.return_value = LLMResponse(text="", tool_calls=[call])
+    
+    response = manager.process_message("Forget that memory", session_id="sess-tools-conf")
+    assert "wants to execute 'forget_memory'" in response
+    assert "Shall I proceed?" in response
+    
+    # Check that it actually intercepts correctly and sets state
+    assert state_manager.get_session("sess-tools-conf").status == SessionStatus.WAITING_FOR_CONFIRMATION
+    
+    # Now send "yes"
+    manager._mock_gateway.chat.return_value = LLMResponse(text="Memory forgotten.", tool_calls=None)
+    response2 = manager.process_message("yes", session_id="sess-tools-conf")
+    
+    assert "Memory forgotten." in response2
+    assert state_manager.get_session("sess-tools-conf").status == SessionStatus.IDLE
+    
+    # Verify it was actually deleted
+    assert len(memory_service.list_memories("sess-tools-conf")) == 0

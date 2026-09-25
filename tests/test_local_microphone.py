@@ -6,14 +6,16 @@ from app.config import get_settings
 
 @pytest.fixture
 def mock_sounddevice():
-    with mock.patch("app.voice.providers.local_microphone.sd") as mock_sd:
-        # Also patch the global _SOUNDDEVICE_AVAILABLE to True for the module
-        with mock.patch("app.voice.providers.local_microphone._SOUNDDEVICE_AVAILABLE", True):
-            yield mock_sd
+    import numpy as np
+    with mock.patch("app.voice.providers.local_microphone.sd", create=True) as mock_sd:
+        with mock.patch("app.voice.providers.local_microphone.np", np, create=True):
+            # Also patch the global _SOUNDDEVICE_AVAILABLE to True for the module
+            with mock.patch("app.voice.providers.local_microphone._SOUNDDEVICE_AVAILABLE", True):
+                yield mock_sd
 
 @pytest.fixture
 def mock_soundfile():
-    with mock.patch("app.voice.providers.local_microphone.sf") as mock_sf:
+    with mock.patch("app.voice.providers.local_microphone.sf", create=True) as mock_sf:
         yield mock_sf
 
 def test_microphone_interface_implemented():

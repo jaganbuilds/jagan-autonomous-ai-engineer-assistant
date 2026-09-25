@@ -94,12 +94,17 @@ def test_local_stt_tanglish_hint(mock_whisper_module, mock_audio_file):
     mock_instance = mock_whisper_module.return_value
     mock_instance.transcribe.assert_called_with("temp_audio/test.wav", language=None, beam_size=5)
 
-def test_local_stt_missing_dependency():
+def test_local_stt_missing_dependency(monkeypatch):
     provider = LocalSTTProvider()
-    # Ensuring faster_whisper is NOT in sys.modules
-    import sys
-    if "faster_whisper" in sys.modules:
-        del sys.modules["faster_whisper"]
+    
+    # Mock __import__ to raise ImportError for faster_whisper
+    original_import = __import__
+    def mock_import(name, *args, **kwargs):
+        if name == "faster_whisper":
+            raise ImportError("faster-whisper is not installed")
+        return original_import(name, *args, **kwargs)
+        
+    monkeypatch.setattr("builtins.__import__", mock_import)
         
     with pytest.raises(ImportError, match="faster-whisper is not installed"):
         provider._initialize_model()

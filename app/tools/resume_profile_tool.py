@@ -27,15 +27,15 @@ def extract_and_save_profile(session_id: str, file_path: str) -> dict:
             "error": "Failed to read resume. Ensure the file is a valid, readable PDF and exists at the specified path."
         }
         
-    # 2. Extract structured profile using Gemini
+    # 2. Extract structured profile using LLM
     profile = _extractor.extract_profile(text)
     
     if not profile:
         # Check if it was an API key issue or an extraction/JSON issue
-        if not _extractor.client:
+        if not _extractor.api_key:
             return {
                 "status": "error",
-                "error": "Configuration Error: Gemini API key is missing. Cannot extract profile."
+                "error": "Configuration Error: OpenRouter API key is missing. Cannot extract profile."
             }
         return {
             "status": "error",

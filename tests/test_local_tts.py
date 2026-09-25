@@ -42,11 +42,16 @@ def test_local_tts_max_length(monkeypatch):
     with pytest.raises(ValueError, match="exceeds maximum allowed length"):
         provider._validate_text("this is too long")
 
-def test_local_tts_missing_dependency():
+def test_local_tts_missing_dependency(monkeypatch):
     provider = LocalTTSProvider()
-    import sys
-    if "pyttsx3" in sys.modules:
-        del sys.modules["pyttsx3"]
+    
+    original_import = __import__
+    def mock_import(name, *args, **kwargs):
+        if name == "pyttsx3":
+            raise ImportError("pyttsx3 is not installed")
+        return original_import(name, *args, **kwargs)
+        
+    monkeypatch.setattr("builtins.__import__", mock_import)
         
     with pytest.raises(ImportError, match="pyttsx3 is not installed"):
         provider._initialize_engine()

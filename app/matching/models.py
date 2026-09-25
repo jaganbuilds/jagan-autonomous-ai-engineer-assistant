@@ -2,7 +2,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 class SemanticMatchResult(BaseModel):
-    """Semantic analysis of job matching provided by Gemini."""
+    """Semantic analysis of job matching provided by LLM."""
     semantically_related_skills: List[str] = Field(default_factory=list)
     additional_missing_skills: List[str] = Field(default_factory=list)
     reasoning: str

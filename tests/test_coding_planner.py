@@ -9,12 +9,12 @@ from app.agents.checkpoint import checkpoint_repository
 def mock_llm_planner(monkeypatch):
     from app.config import get_settings
     settings = get_settings()
-    settings.gemini_api_key = "mock"
+    settings.openrouter_api_key = "mock"
     
     # We can mock _generate_with_llm to inject specific behaviors
     def set_mock_output(planned_steps):
         monkeypatch.setattr(planner, "_generate_with_llm", lambda goal: planned_steps)
-        settings.gemini_api_key = "real_key_for_test" # bypass fallback
+        settings.openrouter_api_key = "real_key_for_test" # bypass fallback
         
     return set_mock_output
 

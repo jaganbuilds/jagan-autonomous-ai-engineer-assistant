@@ -86,10 +86,11 @@ import os
 def _mock_llm_for_tests(monkeypatch):
     if not os.environ.get('LIVE_TESTS'):
         from unittest.mock import MagicMock
-        def dummy_get_llm_client():
-            mock = MagicMock()
-            mock.models.generate_content.return_value.text = '{"status": "success"}'
-            mock.models.generate_content.return_value.function_calls = []
-            return mock
-        monkeypatch.setattr('app.llm_client.get_llm_client', dummy_get_llm_client)
-        monkeypatch.setattr('app.llm_client.get_llm_client_or_raise', dummy_get_llm_client)
+        from app.llm.gateway import gateway
+        from app.llm.models import LLMResponse
+        
+        monkeypatch.setattr(gateway, 'generate_json', MagicMock(return_value={"status": "success"}))
+        monkeypatch.setattr(gateway, 'generate_text', MagicMock(return_value="Mocked text"))
+        
+        mock_chat_response = LLMResponse(text="Mocked chat", tool_calls=None)
+        monkeypatch.setattr(gateway, 'chat', MagicMock(return_value=mock_chat_response))

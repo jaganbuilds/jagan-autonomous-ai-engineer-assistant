@@ -1,76 +1,54 @@
 import logging
-from typing import Dict, Any
-
-from google import genai
-from google.genai import types
+from typing import Dict, Any, List
+import json
 
 from app.config import get_settings
 from app.tools import registry
 from app.agents.state import state_manager, SessionStatus
 from app.agents.router import router, Intent
+from app.llm.gateway import gateway
+from app.llm.models import ChatMessage, ToolCall, LLMUnavailableError, LLMTimeoutError, LLMError
 
 logger = logging.getLogger(__name__)
 
 class ManagerAgent:
     def __init__(self):
         settings = get_settings()
-        self.api_key = settings.gemini_api_key
-        self.client = None
-        self._chats: Dict[str, Any] = {}
+        self._chats: Dict[str, List[ChatMessage]] = {}
         
-        from app.llm_client import get_llm_client
-        self.client = get_llm_client()
-        if self.client:
-             self.model = 'gemini-3.6-flash'
-             self.base_config = types.GenerateContentConfig(
-                 system_instruction=(
-                     "You are Jagan AI, a helpful and expert AI Engineer Assistant. "
-                     "You have access to tools. Use them when necessary to fulfill the user's request. "
-                     "Always explain what you are doing before or after using a tool."
-                 ),
-                 temperature=0.7,
-                 tools=registry.get_all_tools(),
-                 # We disable automatic function calling so we can intercept calls for confirmation
-                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
-             )
+        self.system_instruction = (
+            "You are Jagan AI, a helpful and expert AI Engineer Assistant. "
+            "You have access to tools. Use them when necessary to fulfill the user's request. "
+            "Always explain what you are doing before or after using a tool."
+        )
 
-    def _get_chat(self, session_id: str):
-        if not self.client:
-            return None
+    def _get_chat(self, session_id: str) -> List[ChatMessage]:
         if session_id not in self._chats:
-            self._chats[session_id] = self.client.chats.create(
-                model=self.model,
-                config=self.base_config
-            )
+            self._chats[session_id] = [
+                ChatMessage(role="system", content=self.system_instruction)
+            ]
         return self._chats[session_id]
 
-    def _execute_tool(self, name: str, args: Dict[str, Any], session_id: str = "default") -> types.Part:
-        """Executes a tool from the registry and wraps the result in a FunctionResponse Part."""
+    def _execute_tool(self, name: str, args: Dict[str, Any], session_id: str = "default") -> str:
+        """Executes a tool from the registry and returns the result."""
         tool_func = registry.get_tool(name)
         if not tool_func:
-            result = f'{{"status": "error", "error": "Tool {name} not found"}}'
-        else:
-            import inspect
-            sig = inspect.signature(tool_func)
-            if "session_id" in sig.parameters:
-                args["session_id"] = session_id
-            result = tool_func(**args)
+            return f'{{"status": "error", "error": "Tool {name} not found"}}'
+        
+        import inspect
+        sig = inspect.signature(tool_func)
+        if "session_id" in sig.parameters:
+            args["session_id"] = session_id
+        result = tool_func(**args)
             
-        return types.Part.from_function_response(
-            name=name,
-            response={"result": result}
-        )
+        return result
 
     def process_message(self, message: str, session_id: str = "default") -> str:
         """
-        Processes a user message through the TaskRouter, StateManager, and Gemini.
+        Processes a user message through the TaskRouter, StateManager, and LLM Gateway.
         Handles multi-step tool execution and confirmation intercepts.
         """
-        if not self.client:
-            logger.error("Gemini API key is not configured.")
-            return "Configuration Error: Gemini API key is missing. Please set GEMINI_API_KEY in the .env file."
-        
-        chat = self._get_chat(session_id)
+        chat_history = self._get_chat(session_id)
         session = state_manager.get_session(session_id)
         
         try:
@@ -102,12 +80,13 @@ class ManagerAgent:
                                 
                         else:
                             result = confirmation_manager.confirm_email(session_id)
-                            # Tell Gemini the email was confirmed (so it can continue the conversation)
-                            func_response_part = types.Part.from_function_response(
+                            chat_history.append(ChatMessage(
+                                role="tool",
+                                tool_call_id=session.pending_tool_call.get('id', 'call_0') if session.pending_tool_call else 'call_0',
                                 name="send_email",
-                                response={"result": result}
-                            )
-                            response = chat.send_message(func_response_part)
+                                content=json.dumps({"result": result})
+                            ))
+                            response = gateway.chat(chat_history, tools=registry.get_all_tools())
                     
                     elif msg_lower in ['no', 'n', 'reject', 'cancel', "don't send", 'stop', 'வேண்டாம்', 'நிறுத்து', 'vendam']:
                         logger.info("User rejected email sending.")
@@ -120,12 +99,13 @@ class ManagerAgent:
                             return OrchestrationResponseMapper.map_to_natural_response(orch_result)
                         else:
                             result = confirmation_manager.reject_email(session_id)
-                            # Tell Gemini the email was rejected
-                            func_response_part = types.Part.from_function_response(
+                            chat_history.append(ChatMessage(
+                                role="tool",
+                                tool_call_id=session.pending_tool_call.get('id', 'call_0') if session.pending_tool_call else 'call_0',
                                 name="send_email",
-                                response={"result": result}
-                            )
-                            response = chat.send_message(func_response_part)
+                                content=json.dumps({"result": result})
+                            ))
+                            response = gateway.chat(chat_history, tools=registry.get_all_tools())
                         
                     else:
                         return "Please clearly reply 'yes' to send the email or 'no' to cancel."
@@ -146,12 +126,13 @@ class ManagerAgent:
                                 state_manager.update_status(session_id, SessionStatus.IDLE)
                             return OrchestrationResponseMapper.map_to_natural_response(orch_result)
                         else:
-                            # Direct tool response to Gemini
-                            func_response_part = types.Part.from_function_response(
+                            chat_history.append(ChatMessage(
+                                role="tool",
+                                tool_call_id=session.pending_tool_call.get('id', 'call_0'),
                                 name="consolidate_memories",
-                                response={"result": result}
-                            )
-                            response = chat.send_message(func_response_part)
+                                content=json.dumps({"result": result})
+                            ))
+                            response = gateway.chat(chat_history, tools=registry.get_all_tools())
                             
                     elif msg_lower in ['no', 'n', 'reject', 'cancel', 'stop']:
                         logger.info("User rejected memory consolidation.")
@@ -164,11 +145,13 @@ class ManagerAgent:
                             state_manager.update_status(session_id, SessionStatus.IDLE)
                             return OrchestrationResponseMapper.map_to_natural_response(orch_result)
                         else:
-                            func_response_part = types.Part.from_function_response(
+                            chat_history.append(ChatMessage(
+                                role="tool",
+                                tool_call_id=session.pending_tool_call.get('id', 'call_0'),
                                 name="consolidate_memories",
-                                response={"result": result}
-                            )
-                            response = chat.send_message(func_response_part)
+                                content=json.dumps({"result": result})
+                            ))
+                            response = gateway.chat(chat_history, tools=registry.get_all_tools())
                             
                     else:
                         return "Please clearly reply 'yes' to apply the memory consolidation or 'no' to cancel."
@@ -178,6 +161,7 @@ class ManagerAgent:
                     if msg_lower in ['yes', 'y', 'confirm', 'approve', 'proceed', 'go ahead', 'ஆமாம்', 'சரி', 'அனுப்பு', 'aama', 'seri', 'anuppu']:
                         tool_name = session.pending_tool_call['name']
                         tool_args = session.pending_tool_call['args']
+                        tool_id = session.pending_tool_call.get('id', 'call_0')
                         
                         logger.info(f"User confirmed execution of {tool_name}")
                         
@@ -191,10 +175,16 @@ class ManagerAgent:
                             return OrchestrationResponseMapper.map_to_natural_response(orch_result)
                                 
                         else:
-                            func_response_part = self._execute_tool(tool_name, tool_args, session_id)
+                            result = self._execute_tool(tool_name, tool_args, session_id)
                             state_manager.clear_pending_tool(session_id)
                             
-                            response = chat.send_message(func_response_part)
+                            chat_history.append(ChatMessage(
+                                role="tool",
+                                tool_call_id=tool_id,
+                                name=tool_name,
+                                content=json.dumps({"result": result})
+                            ))
+                            response = gateway.chat(chat_history, tools=registry.get_all_tools())
                     
                     elif msg_lower in ['no', 'n', 'reject', 'cancel', 'stop', 'வேண்டாம்', 'நிறுத்து', 'vendam']:
                         if is_orchestrating:
@@ -211,7 +201,8 @@ class ManagerAgent:
                 else:
                     # Should not reach here if WAITING_FOR_CONFIRMATION is set correctly
                     state_manager.update_status(session_id, SessionStatus.IDLE)
-                    response = chat.send_message(message)
+                    chat_history.append(ChatMessage(role="user", content=message))
+                    response = gateway.chat(chat_history, tools=registry.get_all_tools())
             else:
                 # 2. Normal Flow
                 state_manager.update_status(session_id, SessionStatus.PROCESSING)
@@ -266,43 +257,60 @@ class ManagerAgent:
                         return OrchestrationResponseMapper.map_to_natural_response(orch_result)
                 
                 else:
-                    # Send the message to Gemini
-                    response = chat.send_message(augmented_message)
+                    chat_history.append(ChatMessage(role="user", content=augmented_message))
+                    response = gateway.chat(chat_history, tools=registry.get_all_tools())
 
             # 3. Process Function Calls (Manual Loop)
             # This loop handles tools both for the Normal Flow and Confirmation resumes
             while True:
-                if not response.function_calls:
-                    # No more tools to call, we have a final text response
+                # Add assistant message to history before processing it
+                if response.tool_calls:
+                    chat_history.append(ChatMessage(
+                        role="assistant",
+                        content=response.text,
+                        tool_calls=response.tool_calls
+                    ))
+                else:
+                    if response.text:
+                        chat_history.append(ChatMessage(
+                            role="assistant",
+                            content=response.text
+                        ))
                     if session.status != SessionStatus.WAITING_FOR_CONFIRMATION:
                         state_manager.update_status(session_id, SessionStatus.IDLE)
-                    return response.text
+                    return response.text or "Success"
                 
                 # For simplicity, handle the first function call in this turn
-                call = response.function_calls[0]
+                call = response.tool_calls[0]
                 tool_name = call.name
-                
-                # Extract args securely
-                tool_args = {}
-                if hasattr(call, 'args'):
-                    tool_args = {k: v for k, v in call.args.items()}
+                tool_args = call.arguments
+                tool_id = call.id
                 
                 if registry.requires_confirmation(tool_name):
                     # Intercept!
                     state_manager.set_pending_tool(session_id, tool_name, tool_args)
+                    # We must store id to respond properly after confirmation
+                    session = state_manager.get_session(session_id)
+                    if session.pending_tool_call:
+                        session.pending_tool_call['id'] = tool_id
                     return f"The agent wants to execute '{tool_name}' with arguments {tool_args}. Shall I proceed? (Yes/No)"
                 else:
                     # Execute normally and loop
                     logger.info(f"Executing tool {tool_name} automatically...")
-                    func_response_part = self._execute_tool(tool_name, tool_args, session_id)
-                    response = chat.send_message(func_response_part)
+                    result = self._execute_tool(tool_name, tool_args, session_id)
+                    chat_history.append(ChatMessage(
+                        role="tool",
+                        tool_call_id=tool_id,
+                        name=tool_name,
+                        content=json.dumps({"result": result})
+                    ))
+                    response = gateway.chat(chat_history, tools=registry.get_all_tools())
                     
         except Exception as e:
             state_manager.update_status(session_id, SessionStatus.ERROR)
             logger.error(f"Error processing message: {e}")
-            from google.genai.errors import APIError
-            if isinstance(e, APIError):
+            if isinstance(e, LLMUnavailableError):
                 return "The AI model is temporarily unavailable. Please try again later."
-            if "deadline" in str(e).lower() or "timeout" in str(e).lower():
+            if isinstance(e, LLMTimeoutError) or "deadline" in str(e).lower() or "timeout" in str(e).lower():
                 return "The AI model is temporarily unavailable. Please try again later."
             return f"Error: Failed to process message. Details: {str(e)}"

@@ -10,6 +10,7 @@ from app.config import get_settings
 
 @pytest.fixture
 def mock_db_repository():
+    get_settings().memory_semantic_retrieval_enabled = False
     repo = JobRepository("file:memdb_global_maint?mode=memory&cache=shared")
     mem_repo = get_memory_repository("file:memdb_global_maint?mode=memory&cache=shared")
     set_job_repository_for_testing(repo)
@@ -129,7 +130,10 @@ def test_consolidation_redundancy(mock_db_repository):
         elif c.memory_id == m2.id:
             assert c.recommended_action == MaintenanceAction.KEEP
 
-def test_semantic_redundancy(mock_db_repository):
+@__import__('unittest.mock').mock.patch('app.memory.semantic.semantic_engine.compute_similarity')
+def test_semantic_redundancy(mock_sim, mock_db_repository):
+    get_settings().memory_semantic_retrieval_enabled = True
+    mock_sim.return_value = [0.95]
     session_id = "test_maint"
     owner_id = "default_owner"
     

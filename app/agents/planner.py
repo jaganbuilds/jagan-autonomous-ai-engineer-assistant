@@ -3,8 +3,6 @@ from typing import Dict, Any, List
 import json
 import logging
 from pydantic import BaseModel
-from google import genai
-from google.genai import types
 
 from app.agents.orchestration import AgentPlan, PlanStep, orchestrator
 from app.tools.registry import registry
@@ -27,7 +25,7 @@ class AgentPlanner:
     def __init__(self):
         self.job_search_pattern = re.compile(r'\b(find.*jobs|search.*jobs)\b', re.IGNORECASE)
         settings = get_settings()
-        self.api_key = settings.gemini_api_key
+        self.api_key = settings.openrouter_api_key
         
     def create_plan_for_goal(self, session_id: str, goal: str) -> AgentPlan:
         """
@@ -118,18 +116,10 @@ class AgentPlanner:
         """
         
         try:
-            from app.llm_client import get_llm_client_or_raise
-            client = get_llm_client_or_raise()
-            response = client.models.generate_content(
-                model='gemini-3.6-flash',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json"
-                )
-            )
+            from app.llm.gateway import gateway
             
-            data = json.loads(response.text)
+            data = gateway.generate_json(prompt, temperature=0.0)
+            
             steps = []
             for item in data:
                 steps.append(PlannedStep(**item))

@@ -66,7 +66,7 @@ def test_phase_6_end_to_end_lifecycle(mock_db_repository, monkeypatch):
     from app.tools import application_preparation_tool
     monkeypatch.setattr(application_preparation_tool.application_service, "job_repository", mock_db_repository)
     
-    # Mock Gemini call in HR email draft
+    # Mock LLM call in HR email draft
     monkeypatch.setattr("app.tools.hr_email_tool.draft_hr_email", MagicMock(return_value={
         "status": "success",
         "draft": {

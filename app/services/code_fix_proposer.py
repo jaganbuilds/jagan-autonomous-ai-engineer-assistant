@@ -16,7 +16,7 @@ class CodeFixProposer:
     def __init__(self):
         from app.config import get_settings
         settings = get_settings()
-        self.api_key = settings.gemini_api_key
+        self.api_key = settings.openrouter_api_key
         
     def generate_proposal(self, session_id: str, analysis: Dict[str, Any]) -> Optional[ProposedFix]:
         failed_tests = analysis.get("failed_tests", [])
@@ -59,10 +59,8 @@ class CodeFixProposer:
         
     def _generate_with_llm(self, filepath: str, message: str, content: str) -> Optional[ProposedFix]:
         try:
-            from app.llm_client import get_llm_client_or_raise
-            from google.genai import types
+            from app.llm.gateway import gateway
             
-            client = get_llm_client_or_raise()
             prompt = f"""
             Analyze this test failure and propose a fix.
             File: {filepath}
@@ -80,20 +78,12 @@ class CodeFixProposer:
             }}
             """
             
-            response = client.models.generate_content(
-                model='gemini-3.6-flash',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.1,
-                    response_mime_type="application/json"
-                )
-            )
+            data = gateway.generate_json(prompt, temperature=0.1)
             
             # Very basic untrusted output sanitization
-            if "IGNORE PREVIOUS" in response.text.upper() or "DELETE" in response.text.upper():
+            if "IGNORE PREVIOUS" in str(data).upper() or "DELETE" in str(data).upper():
                 return None # Reject prompt injection
                 
-            data = json.loads(response.text)
             return ProposedFix(**data)
             
         except Exception as e:

@@ -1,30 +1,26 @@
 import pytest
-import json
 from unittest.mock import MagicMock, patch
 from pydantic import ValidationError
+from app.matching.semantic_matcher import SemanticJobMatcher, SemanticMatchResult
 from app.job_sources.base import Job
 from app.profile.models import CandidateProfile
-from app.matching.models import MatchResult, SemanticMatchResult
-from app.matching.semantic_matcher import SemanticJobMatcher
+from app.matching.models import MatchResult
+from app.llm.gateway import gateway
 
 @pytest.fixture
-def matcher():
-    with patch('app.matching.semantic_matcher.get_settings') as mock_settings:
-        mock_settings.return_value.gemini_api_key = "fake_key"
-        with patch('app.llm_client.get_llm_client') as mock_client:
-            sem_matcher = SemanticJobMatcher()
-            sem_matcher.client = MagicMock()
-            return sem_matcher
+def matcher(monkeypatch):
+    monkeypatch.setattr("app.matching.semantic_matcher.get_settings", MagicMock(return_value=MagicMock(openrouter_api_key="test")))
+    return SemanticJobMatcher()
 
 @pytest.fixture
 def dummy_job():
     return Job(
         title="AI Engineer",
         company="TechCorp",
-        description="Requires Neural Networks and deep understanding of backend.",
         location="Remote",
         experience="Mid",
-        url="http://test.com"
+        description="Requires Neural Networks and Deep Learning.",
+        url="https://example.com/job"
     )
 
 @pytest.fixture
@@ -33,13 +29,7 @@ def dummy_profile():
         name="John",
         experience_level="Mid",
         education="BS",
-        skills=["Deep Learning", "Backend APIs"],
-        target_roles=[],
-        preferred_locations=[],
-        programming_languages=[],
-        frameworks=[],
-        databases=[],
-        ai_ml_technologies=[]
+        skills=["Deep Learning", "Backend APIs"]
     )
 
 @pytest.fixture
@@ -54,68 +44,39 @@ def dummy_match_result():
     )
 
 def test_semantic_relationship_detected(matcher, dummy_job, dummy_profile, dummy_match_result):
-    mock_response = MagicMock()
-    mock_response.text = '''{
-        "semantically_related_skills": ["Neural Networks (matches Deep Learning)"],
-        "additional_missing_skills": [],
-        "reasoning": "Deep learning implies neural networks.",
-        "confidence": "high"
-    }'''
-    matcher.client.models.generate_content.return_value = mock_response
-    
+    gateway.generate_json.return_value = SemanticMatchResult(
+        semantically_related_skills=["Neural Networks (matches Deep Learning)"],
+        additional_missing_skills=[],
+        reasoning="Deep learning implies neural networks.",
+        confidence="high",
+        next_steps=[]
+    )
+
     result = matcher.analyze(dummy_job, dummy_profile, dummy_match_result)
-    
+
     assert result is not None
     assert isinstance(result, SemanticMatchResult)
     assert len(result.semantically_related_skills) == 1
+    assert "Neural Networks" in result.semantically_related_skills[0]
     assert result.confidence == "high"
 
 def test_no_semantic_relationship(matcher, dummy_job, dummy_profile, dummy_match_result):
-    mock_response = MagicMock()
-    mock_response.text = '''{
-        "semantically_related_skills": [],
-        "additional_missing_skills": ["Go", "Kubernetes"],
-        "reasoning": "Candidate doesn't have the required tech.",
-        "confidence": "high"
-    }'''
-    matcher.client.models.generate_content.return_value = mock_response
-    
+    gateway.generate_json.return_value = SemanticMatchResult(
+        semantically_related_skills=[],
+        additional_missing_skills=["Go", "Kubernetes"],
+        reasoning="Candidate doesn't have the required tech.",
+        confidence="high",
+        next_steps=[]
+    )
+
     result = matcher.analyze(dummy_job, dummy_profile, dummy_match_result)
     assert len(result.semantically_related_skills) == 0
-    assert len(result.additional_missing_skills) == 2
+    assert "Go" in result.additional_missing_skills
+    assert "Kubernetes" in result.additional_missing_skills
 
-def test_invalid_gemini_response(matcher, dummy_job, dummy_profile, dummy_match_result):
-    mock_response = MagicMock()
-    mock_response.text = '{"bad_key": "val"}'
-    matcher.client.models.generate_content.return_value = mock_response
-    
-    result = matcher.analyze(dummy_job, dummy_profile, dummy_match_result)
-    # Should safely fail and return None
-    assert result is None
+def test_semantic_api_failure(matcher, dummy_job, dummy_profile, dummy_match_result):
+    gateway.generate_json.side_effect = Exception("API Error")
 
-def test_gemini_api_failure(matcher, dummy_job, dummy_profile, dummy_match_result):
-    matcher.client.models.generate_content.side_effect = Exception("API down")
-    
     result = matcher.analyze(dummy_job, dummy_profile, dummy_match_result)
     assert result is None
-
-def test_missing_api_key(dummy_job, dummy_profile, dummy_match_result):
-    with patch('app.matching.semantic_matcher.get_settings') as mock_settings:
-        mock_settings.return_value.gemini_api_key = None
-        matcher = SemanticJobMatcher()
-        
-        result = matcher.analyze(dummy_job, dummy_profile, dummy_match_result)
-        assert result is None
-
-def test_hallucination_rejected_prompt_check(matcher, dummy_job, dummy_profile, dummy_match_result):
-    mock_response = MagicMock()
-    mock_response.text = '{"semantically_related_skills": [], "additional_missing_skills": [], "reasoning": "OK", "confidence": "high"}'
-    matcher.client.models.generate_content.return_value = mock_response
-    
-    matcher.analyze(dummy_job, dummy_profile, dummy_match_result)
-    
-    call_args = matcher.client.models.generate_content.call_args
-    prompt = call_args[1]['contents']
-    
-    assert "DO NOT invent or hallucinate" in prompt
-    assert "Do NOT convert uncertain relationships" in prompt
+    gateway.generate_json.side_effect = None

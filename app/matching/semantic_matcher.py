@@ -1,7 +1,5 @@
 import logging
 from typing import Optional
-from google import genai
-from google.genai import types
 from pydantic import ValidationError
 
 from app.config import get_settings
@@ -13,25 +11,22 @@ logger = logging.getLogger(__name__)
 
 class SemanticJobMatcher:
     """
-    Optional semantic analysis layer powered by Gemini.
+    Optional semantic analysis layer powered by LLM.
     Identifies related skills that the deterministic matcher may miss (e.g., 'Deep Learning' vs 'Neural Networks').
     Strictly forbids hallucinating unsupported skills.
     """
     
     def __init__(self):
         settings = get_settings()
-        self.api_key = settings.gemini_api_key
-        from app.llm_client import get_llm_client
-        self.client = get_llm_client()
-        self.model = 'gemini-2.5-flash'
+        self.api_key = settings.openrouter_api_key
 
     def analyze(self, job: Job, profile: CandidateProfile, deterministic_match: MatchResult) -> Optional[SemanticMatchResult]:
         """
         Runs semantic analysis on the job and profile, respecting the deterministic bounds.
         Fails safely (returns None) on any API or validation error.
         """
-        if not self.client:
-            logger.warning("Gemini Client not initialized (missing API key). Skipping semantic matching.")
+        if not self.api_key:
+            logger.warning("API key not initialized. Skipping semantic matching.")
             return None
             
         if not job.description or len(job.description.strip()) < 20:
@@ -69,26 +64,17 @@ Projects: {', '.join([p.name for p in profile.projects])}
 Already Matched: {', '.join(deterministic_match.matched_skills)}
 Already Missing: {', '.join(deterministic_match.missing_skills)}
 """
-
         try:
             logger.info(f"Running semantic analysis for job: {job.title}")
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=SemanticMatchResult,
-                    temperature=0.0
-                )
+            from app.llm.gateway import gateway
+            result = gateway.generate_json(
+                prompt,
+                schema=SemanticMatchResult,
+                temperature=0.0
             )
-            
-            if not response.text:
-                return None
-                
-            return SemanticMatchResult.model_validate_json(response.text)
-            
+            return result
         except ValidationError as ve:
-            logger.error("Gemini returned invalid JSON for semantic matching.")
+            logger.error("LLM returned invalid JSON for semantic matching.")
             return None
         except Exception as e:
             logger.error(f"Error during semantic matching: {type(e).__name__}")

@@ -1,7 +1,5 @@
 import logging
 from typing import Optional
-from google import genai
-from google.genai import types
 from pydantic import ValidationError
 
 from app.config import get_settings
@@ -11,16 +9,12 @@ logger = logging.getLogger(__name__)
 
 class ResumeProfileExtractor:
     """
-    Extracts structured CandidateProfile from raw resume text using Gemini.
+    Extracts structured CandidateProfile from raw resume text using LLM.
     """
     
     def __init__(self):
         settings = get_settings()
-        self.api_key = settings.gemini_api_key
-        from app.llm_client import get_llm_client
-        self.client = get_llm_client()
-            
-        self.model = 'gemini-2.5-flash'
+        self.api_key = settings.openrouter_api_key
         
     def extract_profile(self, resume_text: str) -> Optional[CandidateProfile]:
         """
@@ -31,8 +25,8 @@ class ResumeProfileExtractor:
             logger.warning("Empty resume text provided for extraction.")
             return None
             
-        if not self.client:
-            logger.error("Gemini Client not initialized (missing API key).")
+        if not self.api_key:
+            logger.error("API key not initialized.")
             return None
 
         prompt = f"""
@@ -51,33 +45,22 @@ Resume Text:
 """
         
         try:
-            logger.info("Sending resume text to Gemini for structured extraction.")
+            logger.info("Sending resume text to LLM for structured extraction.")
             
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=CandidateProfile,
-                    temperature=0.0
-                )
+            from app.llm.gateway import gateway
+            profile = gateway.generate_json(
+                prompt,
+                schema=CandidateProfile,
+                temperature=0.0
             )
             
-            # The API returns structured JSON based on our Pydantic schema
-            if not response.text:
-                logger.error("Received empty response from Gemini.")
+            if not profile:
+                logger.error("Received empty response from LLM.")
                 return None
                 
-            try:
-                # Validation layer: strictly ensure the output matches our exact schema
-                profile = CandidateProfile.model_validate_json(response.text)
-                logger.info("Successfully extracted and validated CandidateProfile.")
-                return profile
-            except ValidationError as ve:
-                logger.error("Gemini returned JSON that failed Pydantic validation.")
-                # We do not log the full raw JSON for privacy reasons, only the fact it failed
-                return None
+            logger.info("Successfully extracted and validated CandidateProfile.")
+            return profile
                 
         except Exception as e:
-            logger.error(f"Error communicating with Gemini API: {type(e).__name__}")
+            logger.error(f"Error communicating with LLM API: {type(e).__name__} - {str(e)}")
             return None

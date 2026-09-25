@@ -12,7 +12,7 @@ from app.tools.registry import registry
 @pytest.fixture
 def mock_proposer():
     # Force deterministic fallback for fast logical tests
-    with mock.patch("app.llm_client.get_llm_client_or_raise", side_effect=Exception("force fallback")):
+    with mock.patch("app.llm.gateway.gateway.generate_json", side_effect=Exception("force fallback")):
         yield GitCommitProposer()
 
 def test_no_changes(mock_proposer):
@@ -93,23 +93,19 @@ def test_truncated_diff(mock_proposer):
         assert proposal["truncated_info"] is True
         assert "truncated" in proposal["change_summary"].lower()
 
-@mock.patch("app.llm_client.get_llm_client_or_raise")
+@mock.patch("app.llm.gateway.gateway.generate_json")
 def test_llm_generation(mock_client_class):
     # Setup live proposer
     with mock.patch("app.config.get_settings") as mock_settings:
-        mock_settings.return_value.gemini_api_key = "valid_key"
+        mock_settings.return_value.openrouter_api_key = "valid_key"
         proposer = GitCommitProposer()
         
-    mock_client = mock.Mock()
-    mock_client_class.return_value = mock_client
-    
-    mock_response = mock.Mock()
-    mock_response.text = json.dumps({
+    mock_client_class.return_value = {
         "change_summary": "Added a new feature.",
         "proposed_commit_message": "feat: add new feature",
         "rationale": "Because."
-    })
-    mock_client.models.generate_content.return_value = mock_response
+    }
+    
     
     with mock.patch("app.services.git_commit_proposer.get_git_status") as m_status, \
          mock.patch("app.services.git_commit_proposer.get_git_diff_staged") as m_staged, \
@@ -125,14 +121,12 @@ def test_llm_generation(mock_client_class):
 def test_llm_malformed_output_fallback(monkeypatch):
     from unittest.mock import MagicMock
     with mock.patch("app.config.get_settings") as mock_settings:
-        mock_settings.return_value.gemini_api_key = "valid_key"
+        mock_settings.return_value.openrouter_api_key = "valid_key"
         proposer = GitCommitProposer()
         
-    mock_client = MagicMock()
-    mock_response = MagicMock()
-    mock_response.text = "NOT JSON"
-    mock_client.models.generate_content.return_value = mock_response
-    monkeypatch.setattr('app.llm_client.get_llm_client_or_raise', lambda: mock_client)
+    def mock_raise(*args, **kwargs):
+        raise Exception("Validation Error")
+    monkeypatch.setattr('app.llm.gateway.gateway.generate_json', mock_raise)
     
     with mock.patch("app.services.git_commit_proposer.get_git_status") as m_status, \
          mock.patch("app.services.git_commit_proposer.get_git_diff_staged") as m_staged, \
@@ -189,7 +183,7 @@ def test_side_effect_verification(tmp_path):
     with mock.patch("app.integrations.local_system.LocalSystemIntegration._get_workspace_root") as m_root, \
          mock.patch("app.config.get_settings") as mock_settings:
         m_root.return_value = str(repo_dir)
-        mock_settings.return_value.gemini_api_key = "mock"
+        mock_settings.return_value.openrouter_api_key = "mock"
         mock_settings.return_value.workspace_execution_timeout_seconds = 5
         mock_settings.return_value.workspace_execution_max_output_bytes = 50000
         
@@ -222,3 +216,4 @@ def test_side_effect_verification(tmp_path):
 
         # 4. VERIFY SHELL SYNTAX WAS IGNORED (if it wasn't, repo/fs would be corrupted)
         assert file3.exists()
+

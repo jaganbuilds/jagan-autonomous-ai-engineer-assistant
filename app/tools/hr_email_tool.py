@@ -1,8 +1,6 @@
 import logging
 from typing import Optional
 from pydantic import BaseModel, Field
-from google import genai
-from google.genai import types
 
 from app.tools.registry import registry
 from app.agents.state import state_manager
@@ -29,10 +27,10 @@ def draft_hr_email(session_id: str, job_reference: str) -> dict:
         job_reference: The ID or position of the job (e.g., 'job_1', '1', 'job 2').
     """
     settings = get_settings()
-    if not settings.gemini_api_key:
+    if not settings.openrouter_api_key:
         return {
             "status": "error",
-            "message": "Gemini API key is required to draft an email."
+            "message": "OpenRouter API key is required to draft an email."
         }
         
     session = state_manager.get_session(session_id)
@@ -98,24 +96,17 @@ Missing Skills: {', '.join(match_res.missing_skills)}
         if match_res.semantic_analysis and match_res.semantic_analysis.semantically_related_skills:
             prompt += f"Semantically Related Skills: {', '.join(match_res.semantic_analysis.semantically_related_skills)}\n"
             
-    from app.llm_client import get_llm_client_or_raise
-    client = get_llm_client_or_raise()
+    from app.llm.gateway import gateway
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=EmailDraft,
-                temperature=0.7 # Slight creativity for email writing
-            )
+        draft = gateway.generate_json(
+            prompt,
+            schema=EmailDraft,
+            temperature=0.7 # Slight creativity for email writing
         )
         
-        if not response.text:
+        if not draft:
             return {"status": "error", "message": "Failed to generate email draft."}
             
-        draft = EmailDraft.model_validate_json(response.text)
-        
         # Enforce job_id
         draft.job_id = job_reference
         
